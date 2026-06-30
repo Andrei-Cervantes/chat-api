@@ -113,3 +113,77 @@ exports.register = async (req, res) => {
     });
   }
 };
+
+// Login function
+exports.login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // validate input
+    const errors = validateLogin(email, password);
+    if (errors.lenght > 0) {
+      return res.status(400).json({
+        success: false,
+        error: { message: errors[0], code: "VALIDATION_ERROR" },
+      });
+    }
+
+    // look up user by email
+    const result = await pool.query("SELECT * FROM users WHERE email = $1", [
+      email,
+    ]);
+    if (result.rows.length === 0) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          message: "Invalid credentials",
+          code: "INVALID_CREDENTIALS",
+        },
+      });
+    }
+
+    // validate hashed password with stored hash
+    const user = result.rows[0];
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          message: "Invalid credentials",
+          code: "INVALID_CREDENTIALS",
+        },
+      });
+    }
+
+    // generate fresh tokens
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+
+    // store hashed refresh token
+    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+    await pool.query(
+      "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, NOW() + INTERVAL \`7 days\`)",
+      [user.id, refreshTokenHash],
+    );
+
+    // Set cookies and respond
+    setTokenCookies(res, accessToken, refreshToken);
+    res.json({
+      success: true,
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          created_at: user.created_at,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({
+      success: false,
+      error: { message: "Internal server error", code: "SERVER_ERROR" },
+    });
+  }
+};
