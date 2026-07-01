@@ -41,7 +41,7 @@ const setTokenCookies = (res, accessToken, refreshToken) => {
   });
 };
 
-// Register function
+// Register controller
 exports.register = async (req, res) => {
   try {
     const { email, username, password } = req.body;
@@ -114,14 +114,14 @@ exports.register = async (req, res) => {
   }
 };
 
-// Login function
+// Login controller
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
     // validate input
     const errors = validateLogin(email, password);
-    if (errors.lenght > 0) {
+    if (errors.length > 0) {
       return res.status(400).json({
         success: false,
         error: { message: errors[0], code: "VALIDATION_ERROR" },
@@ -162,7 +162,7 @@ exports.login = async (req, res) => {
     // store hashed refresh token
     const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
     await pool.query(
-      "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, NOW() + INTERVAL \`7 days\`)",
+      "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, NOW() + INTERVAL '7 days')",
       [user.id, refreshTokenHash],
     );
 
@@ -181,6 +181,56 @@ exports.login = async (req, res) => {
     });
   } catch (err) {
     console.error("Login error:", err);
+    res.status(500).json({
+      success: false,
+      error: { message: "Internal server error", code: "SERVER_ERROR" },
+    });
+  }
+};
+
+// Logout controller
+exports.logout = async (req, res) => {
+  try {
+    // Remove the refresh token from the database
+    await pool.query("DELETE FROM refresh_tokens WHERE user_id = $1", [
+      req.user.id,
+    ]);
+
+    // Clear token cookies
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
+
+    res.json({ success: true, message: "Logged out successfully" });
+  } catch (err) {
+    console.error("Logout error:", err);
+    return res.status(500).json({
+      success: false,
+      error: { message: "Internal server error", code: "SERVER_ERROR" },
+    });
+  }
+};
+
+// Get current user controller
+exports.getMe = async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, email, username, avatar_url, created_at FROM users WHERE id = $1",
+      [req.user.id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: { message: "User not found", code: "USER_NOT_FOUND" },
+      });
+    }
+
+    res.json({
+      success: true,
+      data: { user: result.rows[0] },
+    });
+  } catch (err) {
+    console.error("GetMe error:", err);
     res.status(500).json({
       success: false,
       error: { message: "Internal server error", code: "SERVER_ERROR" },
