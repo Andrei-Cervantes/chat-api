@@ -22,7 +22,7 @@ router.post("/register", authLimiter, authController.register);
 router.post("/login", authLimiter, authController.login);
 
 // Token refresh route
-// router.post("/refresh", authController.refresh);
+router.post("/refresh", authController.refresh);
 
 // Protected routes
 router.post("/logout", authenticate, authController.logout);
