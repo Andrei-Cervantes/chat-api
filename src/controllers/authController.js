@@ -19,10 +19,14 @@ const generateAccessToken = (user) => {
 };
 
 // Generate long-lived JWT refresh token (7 days)
-const generateRefreshToken = (user) => {
-  return jwt.sign({ id: user.id }, process.env.REFRESH_TOKEN_SECRET, {
-    expiresIn: "7d",
-  });
+const generateRefreshToken = (user, familyId) => {
+  return jwt.sign(
+    { id: user.id, family: familyId },
+    process.env.REFRESH_TOKEN_SECRET,
+    {
+      expiresIn: "7d",
+    },
+  );
 };
 
 // Set tokens as httpOnly cookies on the response
@@ -82,13 +86,14 @@ exports.register = async (req, res) => {
     const user = result.rows[0];
 
     // Generate tokens and store refresh token hash in database
+    const familyID = require("crypto").randomUUID(); // Generate a unique family ID for the user
     const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
+    const refreshToken = generateRefreshToken(user, familyID);
 
     const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
     await pool.query(
-      "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, NOW() + INTERVAL '7 days')",
-      [user.id, refreshTokenHash],
+      "INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at) VALUES ($1, $2, $3, NOW() + INTERVAL '7 days')",
+      [user.id, refreshTokenHash, familyID],
     );
 
     /// Set cookies and respond with user data
@@ -156,14 +161,15 @@ exports.login = async (req, res) => {
     }
 
     // generate fresh tokens
+    const familyId = require("crypto").randomUUID(); // Generate a unique family ID for the user
     const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
+    const refreshToken = generateRefreshToken(user, familyId);
 
     // store hashed refresh token
     const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
     await pool.query(
-      "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, NOW() + INTERVAL '7 days')",
-      [user.id, refreshTokenHash],
+      "INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at) VALUES ($1, $2, $3, NOW() + INTERVAL '7 days')",
+      [user.id, refreshTokenHash, familyId],
     );
 
     // Set cookies and respond
@@ -261,6 +267,30 @@ exports.refresh = async (req, res) => {
       });
     }
 
+    const familyId = decoded.family;
+
+    // Detect Theft - check if any token in this family has been revoked
+    const revokedCheck = await pool.query(
+      "SELECT * FROM refresh_tokens WHERE family_id = $1 AND is_revoked = TRUE",
+      [familyId],
+    );
+
+    if (revokedCheck.rows.length > 0) {
+      // Revoke all tokens in this family
+      await pool.query("DELETE FROM refresh_tokens WHERE user_id = $1", [
+        decoded.id,
+      ]);
+      res.clearCookie("accessToken");
+      res.clearCookie("refreshToken");
+      return res.status(401).json({
+        success: false,
+        error: {
+          message: "Token reuse detected. All sessions revoked.",
+          code: "TOKEN_THEFT",
+        },
+      });
+    }
+
     // Find valid (non-expired) refresh tokens for this user
     const storedTokens = await pool.query(
       "SELECT * FROM refresh_tokens WHERE user_id = $1 AND expires_at > NOW()",
@@ -288,6 +318,12 @@ exports.refresh = async (req, res) => {
       });
     }
 
+    // Rotation: Mark old token as revoked (consumed)
+    await pool.query(
+      "UPDATE refresh_tokens SET is_revoked = TRUE WHERE id = $1",
+      [validToken.id],
+    );
+
     // Look up user and issue new access token
     const user = await pool.query(
       "SELECT id, email, username FROM users WHERE id = $1",
@@ -301,14 +337,15 @@ exports.refresh = async (req, res) => {
     }
 
     const newAccessToken = generateAccessToken(user.rows[0]);
+    const newRefreshToken = generateRefreshToken(user.rows[0], familyId);
 
-    // Set new access token cookie
-    res.cookie("accessToken", newAccessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 15 * 60 * 1000,
-    });
+    const newRefreshTokenHash = await bcrypt.hash(newRefreshToken, 10);
+    await pool.query(
+      "INSERT INTO refresh_tokens (user_id, token_hash, family_id, is_revoked, expires_at) VALUES ($1, $2, $3, FALSE, NOW() + INTERVAL '7 days')",
+      [decoded.id, newRefreshTokenHash, familyId],
+    );
+
+    setTokenCookies(res, newAccessToken, newRefreshToken);
 
     res.json({ success: true, message: "Token refreshed" });
   } catch (err) {
