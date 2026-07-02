@@ -244,12 +244,10 @@ exports.refresh = async (req, res) => {
     // Read refresh token from cookie
     const refreshToken = req.cookies.refreshToken;
     if (!refreshToken) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          error: { message: "No refresh token provided", code: "NO_TOKEN" },
-        });
+      return res.status(401).json({
+        success: false,
+        error: { message: "No refresh token provided", code: "NO_TOKEN" },
+      });
     }
 
     // verify token signature and expiry
@@ -257,17 +255,15 @@ exports.refresh = async (req, res) => {
     try {
       decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
     } catch (err) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          error: { message: "Invalid refresh token", code: "INVALID_TOKEN" },
-        });
+      return res.status(401).json({
+        success: false,
+        error: { message: "Invalid refresh token", code: "INVALID_TOKEN" },
+      });
     }
 
     // Find valid (non-expired) refresh tokens for this user
     const storedTokens = await pool.query(
-      "SELECT * FROM refresh_tokens WHERE user_id = $1 AND expires_at NOW()",
+      "SELECT * FROM refresh_tokens WHERE user_id = $1 AND expires_at > NOW()",
       [decoded.id],
     );
 
@@ -283,15 +279,13 @@ exports.refresh = async (req, res) => {
     }
 
     if (!validToken) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          error: {
-            message: "Refresh token not recognized",
-            code: "TOKEN_NOT_FOUND",
-          },
-        });
+      return res.status(401).json({
+        success: false,
+        error: {
+          message: "Refresh token not recognized",
+          code: "TOKEN_NOT_FOUND",
+        },
+      });
     }
 
     // Look up user and issue new access token
@@ -300,12 +294,10 @@ exports.refresh = async (req, res) => {
       [decoded.id],
     );
     if (user.rows.length === 0) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          error: { message: "User not found", code: "USER_NOT_FOUND" },
-        });
+      return res.status(401).json({
+        success: false,
+        error: { message: "User not found", code: "USER_NOT_FOUND" },
+      });
     }
 
     const newAccessToken = generateAccessToken(user.rows[0]);
@@ -321,11 +313,9 @@ exports.refresh = async (req, res) => {
     res.json({ success: true, message: "Token refreshed" });
   } catch (err) {
     console.error("Refresh error:", err);
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: { message: "Internal server error", code: "SERVER_ERROR" },
-      });
+    res.status(500).json({
+      success: false,
+      error: { message: "Internal server error", code: "SERVER_ERROR" },
+    });
   }
 };
