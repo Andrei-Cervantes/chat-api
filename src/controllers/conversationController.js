@@ -70,3 +70,35 @@ exports.createConversation = async (req, res) => {
     client.release();
   }
 };
+
+exports.getUserConversations = async (req, res) => {
+  const userId = req.user.id;
+
+  try {
+    const result = await pool.query(
+      `SELECT c.*,
+        (SELECT json_agg(json_build_object('id', u.id, 'username', u.username, 'avatar_url', u.avatar_url))
+         FROM participants p
+         JOIN users u ON p.user_id = u.id
+         WHERE p.conversation_id = c.id) as participants,
+        (SELECT json_build_object('content', m.content, 'sender_id', m.sender_id, 'created_at', m.created_at)
+         FROM messages m
+         WHERE m.conversation_id = c.id
+         ORDER BY m.created_at DESC
+         LIMIT 1) as last_message
+       FROM conversations c
+       JOIN participants p ON c.id = p.conversation_id
+       WHERE p.user_id = $1
+       ORDER BY c.updated_at DESC`,
+      [userId],
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("Error fetching conversations:", err);
+    res.status(500).json({
+      success: false,
+      error: { message: "Failed to fetch conversations" },
+    });
+  }
+};
