@@ -5,6 +5,7 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const authRoutes = require("./routes/auth");
+const conversationRoutes = require("./routes/conversations");
 const { pool } = require("./config/db");
 const { setupSocket } = require("./socket");
 
@@ -35,6 +36,7 @@ app.get("/api/health", (req, res) => {
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/conversations", conversationRoutes);
 
 // Socket.IO setup
 const io = new Server(httpServer, {
