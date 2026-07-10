@@ -64,3 +64,50 @@ exports.sendMessage = async (req, res) => {
     });
   }
 };
+
+exports.getMessages = async (req, res) => {
+  const { conversationId } = req.params;
+  const userId = req.user.id;
+  const { limit = 50, before } = req.query;
+
+  try {
+    // Verify user is a participant
+    const participantCheck = await pool.query(
+      "SELECT id FROM participants WHERE conversation_id = $1 AND user_id = $2",
+      [conversationId, userId],
+    );
+
+    if (participantCheck.rows.length === 0) {
+      return res.status(403).json({
+        success: false,
+        error: { message: "You are not a participant in this conversation" },
+      });
+    }
+
+    // Build query with optional cursor-based pagination
+    let query = `
+      SELECT m.*, json_build_object('id', u.id, 'username', u.username, 'avatar_url', u.avatar_url) as sender
+      FROM messages m
+      JOIN users u ON m.sender_id = u.id
+      WHERE m.conversation_id = $1`;
+    const params = [conversationId];
+
+    if (before) {
+      query += ` AND m.created_at < $${params.length + 1}`;
+      params.push(before);
+    }
+
+    query += ` ORDER BY m.created_at DESC LIMIT $${params.length + 1}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("Error fetching messages:", err);
+    res.status(500).json({
+      success: false,
+      error: { message: "Failed to fetch messages" },
+    });
+  }
+};
