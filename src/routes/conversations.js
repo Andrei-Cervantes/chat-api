@@ -7,6 +7,6 @@ const conversationController = require("../controllers/conversationController");
 router.post("/", authenticate, conversationController.createConversation);
 
 // GET / - List all conversations for the authenticated user
-router.get("/", authenticate, conversationController.listConversations);
+router.get("/", authenticate, conversationController.getUserConversations);
 
 module.exports = router;
