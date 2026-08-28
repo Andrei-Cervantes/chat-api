@@ -2,7 +2,7 @@ const { pool } = require("../config/db");
 
 exports.sendMessage = async (req, res) => {
   const { conversationId } = req.params;
-  const { content, messageType } = req.body;
+  const { content, messageType } = req.body || {};
   const senderId = req.user.id;
 
   // Validate message content
