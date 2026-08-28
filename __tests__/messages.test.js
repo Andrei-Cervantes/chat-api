@@ -13,6 +13,7 @@ describe("Message Endpoints", () => {
   let userA_Cookies, userB_Cookies;
   let userA_ID, userB_ID;
   let conversationID;
+  let messageID;
 
   beforeAll(async () => {
     await createTestUser("msg-a@test.com", "msgUserA", "Password123!");
@@ -48,6 +49,7 @@ describe("Message Endpoints", () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data.content).toBe("Hello from User A Test!");
       expect(res.body.data.sender_id).toBe(userA_ID);
+      messageID = res.body.data.id; // Store message ID for later tests
     });
 
     test("returns 403 for non-participant user", async () => {
@@ -122,6 +124,56 @@ describe("Message Endpoints", () => {
       const receivedMessage = await messagePromise;
       expect(receivedMessage.content).toBe("Real-time test message");
       expect(receivedMessage.sender.username).toBe("msgUserA");
+
+      clientSocket.disconnect();
+    });
+  });
+
+  describe("Read Receipts", () => {
+    test("marking a message as read returns 200", async () => {
+      const res = await request(app)
+        .post(`/api/messages/${messageID}/read`)
+        .set("Cookie", getAuthCookie(userB_Cookies));
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toHaveProperty("messageId");
+      expect(res.body.data).toHaveProperty("readAt");
+    });
+
+    test("duplicate reads are handled gracefully", async () => {
+      const res = await request(app)
+        .post(`/api/messages/${messageID}/read`)
+        .set("Cookie", getAuthCookie(userB_Cookies));
+
+      expect(res.status).toBe(200);
+    });
+
+    test("connected socket receives message:read event", async () => {
+      const cookie = getAuthCookie(userA_Cookies);
+
+      const clientSocket = ioClient(getServerUrl(), {
+        extraHeaders: { cookie },
+        transports: ["polling"],
+      });
+
+      await new Promise((resolve) => clientSocket.on("connect", resolve));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const readPromise = new Promise((resolve) => {
+        clientSocket.on("message:read", (data) => {
+          resolve(data);
+        });
+      });
+
+      await request(app)
+        .post(`/api/messages/${messageID}/read`)
+        .set("Cookie", getAuthCookie(userB_Cookies));
+
+      const readData = await readPromise;
+      expect(readData).toHaveProperty("messageId");
+      expect(readData).toHaveProperty("userId");
+      expect(readData).toHaveProperty("readAt");
 
       clientSocket.disconnect();
     });

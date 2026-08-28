@@ -7,4 +7,11 @@ const messageController = require("../controllers/messageController");
 router.post("/:conversationId", authenticate, messageController.sendMessage);
 router.get("/:conversationId", authenticate, messageController.getMessages);
 
+router.post("/:messageId/read", authenticate, messageController.markAsRead);
+router.get(
+  "/:messageId/reads",
+  authenticate,
+  messageController.getReadReceipts,
+);
+
 module.exports = router;

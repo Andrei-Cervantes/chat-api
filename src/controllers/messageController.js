@@ -111,3 +111,118 @@ exports.getMessages = async (req, res) => {
     });
   }
 };
+
+// mark as read function
+exports.markAsRead = async (req, res) => {
+  const { messageId } = req.params;
+  const userId = req.user.id;
+
+  try {
+    // Verify user is a participant of the conversation that the message belongs to
+    const messageResult = await pool.query(
+      "SELECT m.conversation_id FROM messages m WHERE m.id = $1",
+      [messageId],
+    );
+
+    if (messageResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: { message: "Message not found" },
+      });
+    }
+
+    const conversationId = messageResult.rows[0].conversation_id;
+
+    const participantCheck = await pool.query(
+      "SELECT id FROM participants WHERE conversation_id = $1 AND user_id = $2",
+      [conversationId, userId],
+    );
+
+    if (participantCheck.rows.length === 0) {
+      return res.status(403).json({
+        success: false,
+        error: { message: "You are not a participant in this conversation" },
+      });
+    }
+
+    // insert read receipt (ignore duplicates)
+    const result = await pool.query(
+      `INSERT INTO message_reads (message_id, user_id) VALUES ($1, $2) ON CONFLICT (message_id, user_id) DO NOTHING RETURNING *`,
+      [messageId, userId],
+    );
+
+    // broadcast read receipt to conversation room
+    const io = req.app.get("io");
+    io.to(`conversation:${conversationId}`).emit("message:read", {
+      messageId,
+      userId,
+      readAt: result.rows[0]?.read_at || new Date().toISOString(),
+    });
+
+    res.json({
+      success: true,
+      data: {
+        messageId,
+        userId,
+        readAt: result.rows[0]?.read_at || new Date().toISOString(),
+      },
+    });
+  } catch (err) {
+    console.error("Error marking message as read:", err);
+    res.status(500).json({
+      success: false,
+      error: { message: "Failed to mark message as read" },
+    });
+  }
+};
+
+exports.getReadReceipts = async (req, res) => {
+  const { messageId } = req.params;
+  const userId = req.user.id;
+
+  try {
+    // Get the message's conversation and verify user is a participant
+    const messageResult = await pool.query(
+      "SELECT conversation_id FROM messages WHERE id = $1",
+      [messageId],
+    );
+
+    if (messageResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: { message: "Message not found" },
+      });
+    }
+
+    const conversationId = messageResult.rows[0].conversation_id;
+
+    const participantCheck = await pool.query(
+      "SELECT id FROM participants WHERE conversation_id = $1 AND user_id = $2",
+      [conversationId, userId],
+    );
+
+    if (participantCheck.rows.length === 0) {
+      return res.status(403).json({
+        success: false,
+        error: { message: "You are not a participant in this conversation" },
+      });
+    }
+
+    const result = await pool.query(
+      `SELECT mr.*, json_build_object('id', u.id, 'username', u.username) as user
+       FROM message_reads mr
+       JOIN users u ON mr.user_id = u.id
+       WHERE mr.message_id = $1
+       ORDER BY mr.read_at ASC`,
+      [messageId],
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("Error fetching read receipts:", err);
+    res.status(500).json({
+      success: false,
+      error: { message: "Failed to fetch read receipts" },
+    });
+  }
+};
