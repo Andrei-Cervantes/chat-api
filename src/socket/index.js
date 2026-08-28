@@ -32,7 +32,7 @@ function setupSocket(io) {
     // Auto-join user to their conversation rooms
     try {
       const result = await pool.query(
-        "SELECT conversation_id FROM user_conversations WHERE user_id = $1",
+        "SELECT conversation_id FROM participants WHERE user_id = $1",
         [socket.user.id],
       );
       result.rows.forEach((row) => {

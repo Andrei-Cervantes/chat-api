@@ -5,17 +5,20 @@ const authController = require("../controllers/authController");
 const { authenticate } = require("../middleware/auth");
 
 // Rate limiter for auth routes: 5 attempts per 15 minutes
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 requests per windowMs
-  message: {
-    success: false,
-    error: {
-      message: "Too many requests, please try again later.",
-      code: "RATE_LIMITED",
-    },
-  },
-});
+const authLimiter =
+  process.env.NODE_ENV === "test"
+    ? (req, res, next) => next() // bypass rate limiting in test environment
+    : rateLimit({
+        windowMs: 15 * 60 * 1000, // 15 minutes
+        max: 5, // limit each IP to 5 requests per windowMs
+        message: {
+          success: false,
+          error: {
+            message: "Too many requests, please try again later.",
+            code: "RATE_LIMITED",
+          },
+        },
+      });
 
 // Routes
 router.post("/register", authLimiter, authController.register);
